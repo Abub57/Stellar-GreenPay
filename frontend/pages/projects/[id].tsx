@@ -947,7 +947,7 @@ export default function ProjectDetail({
             <div className="mt-6 inline-flex items-center gap-2 bg-white/20 backdrop-blur-sm px-6 py-3 rounded-full border border-white/30">
               <span className="text-2xl">✅</span>
               <span className="font-semibold text-lg">
-                {formatXLM(project.raisedXLM)} raised of{" "}
+                {formatXLM(project.raisedXLM)} XLM raised{Number(project.raisedUSDC || 0) > 0 ? ` · ${formatAmount(Number(project.raisedUSDC))} USDC` : ""} of{" "}
                 {formatXLM(project.goalXLM)} goal
               </span>
             </div>

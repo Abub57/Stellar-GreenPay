@@ -288,6 +288,8 @@ export async function recordDonation(payload: {
   amountXLM?: string;
   amount?: string;
   currency?: "XLM" | "USDC";
+  assetCode?: string;
+  assetIssuer?: string;
   message?: string;
   transactionHash: string;
 }) {

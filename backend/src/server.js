@@ -35,6 +35,35 @@ const server = http.createServer(app);
 // Sentry initialization (must be added before other middleware)
 initSentry(app);
 
+// ── Security & CSP (Helmet) ──────────────────────────────────────────────────
+const apiHelmet = helmet({
+  contentSecurityPolicy: {
+    useDefaults: false,
+    directives: {
+      defaultSrc: ["'none'"],
+      frameAncestors: ["'none'"],
+    },
+  },
+});
+
+const docsHelmet = helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:"],
+    },
+  },
+});
+
+app.use((req, res, next) => {
+  if (process.env.NODE_ENV !== "production" && req.path.startsWith("/api/docs")) {
+    return docsHelmet(req, res, next);
+  }
+  return apiHelmet(req, res, next);
+});
+
 // ── Swagger UI (development) ─────────────────────────────────────────────────
 if (process.env.NODE_ENV !== "production") {
   try {
@@ -63,11 +92,6 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(helmet());
-app.use((req, res, next) => {
-  res.setHeader("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'");
-  next();
-});
 app.use(requestLogger);
 app.use(express.json({ limit: "20kb" }));
 app.use(cookieParser());

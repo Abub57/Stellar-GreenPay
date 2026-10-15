@@ -131,6 +131,14 @@ how to record baseline numbers.
 
 Every PR must include an update to [CHANGELOG.md](CHANGELOG.md) under the `[Unreleased]` section describing the change. This keeps the release history accurate and simplifies the release process.
 
+### Translations (i18n)
+
+Every UI string must exist in **all** locale files in `frontend/locales/` (`en.json`, `es.json`, `fr.json`, ...). CI runs `node scripts/check-locale-keys.js` on every PR and fails if any locale has keys missing from, or extra to, `en.json`. The log lists each offending key. If you can't translate a string yet, add the English text as a stub in the other locales. Run the check locally before pushing:
+
+```bash
+node scripts/check-locale-keys.js
+```
+
 ## Testing
 
 ```bash

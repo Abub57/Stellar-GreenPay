@@ -221,6 +221,8 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
           donorAddress: publicKey,
           amount: amountNum.toString(),
           currency: currency,
+          assetCode: currency === "USDC" ? "USDC" : undefined,
+          assetIssuer: currency === "USDC" ? process.env.NEXT_PUBLIC_USDC_ISSUER : undefined,
           message: message.trim() || undefined,
           transactionHash: result.hash,
         });
@@ -260,6 +262,8 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
           donorAddress: publicKey,
           amount: amountNum.toString(),
           currency: currency,
+          assetCode: currency === "USDC" ? "USDC" : undefined,
+          assetIssuer: currency === "USDC" ? process.env.NEXT_PUBLIC_USDC_ISSUER : undefined,
           message: message.trim() || undefined,
           transactionHash: result.hash,
         });

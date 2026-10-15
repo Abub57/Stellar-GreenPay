@@ -159,6 +159,7 @@ function mapProjectRow(row) {
     walletAddress: row.wallet_address,
     goalXLM: row.goal_xlm?.toString() || "0",
     raisedXLM: row.raised_xlm?.toString() || "0",
+    raisedUSDC: row.raised_usdc?.toString() || "0",
     donorCount: row.donor_count,
     co2OffsetKg: row.co2_offset_kg,
     co2PerXLM: row.co2_per_xlm?.toString
@@ -203,6 +204,8 @@ function mapDonationRow(row) {
     donorAddress: row.donor_address,
     amount: row.amount?.toString() || "0",
     currency: row.currency,
+    assetCode: row.asset_code || null,
+    assetIssuer: row.asset_issuer || null,
     message: row.message,
     transactionHash: row.transaction_hash,
     createdAt: toIso(row.created_at),

@@ -135,16 +135,16 @@ async function recordDonation(req, res, next) {
   let inTransaction = false;
 
   try {
-    const { projectId, donorAddress, amountXLM, amount, currency = "XLM", message, transactionHash } = req.body;
+    const { projectId, donorAddress, amountXLM, amount, currency = "XLM", assetCode, assetIssuer, message, transactionHash } = req.body;
+    if (!["XLM", "USDC"].includes(currency)) { const e = new Error("Unsupported donation currency"); e.status = 400; throw e; }
+    if (currency === "USDC" && (assetCode !== "USDC" || !/^G[A-Z0-9]{55}$/.test(assetIssuer || ""))) {
+      const e = new Error("A valid USDC asset code and issuer are required"); e.status = 400; throw e;
+    }
     const donorCountry = resolveDonorCountry(req.ip);
     validateKey(donorAddress);
     validateTxHash(transactionHash);
 
     client = await pool.connect();
-
-    const projectResult = await client.query("SELECT id, co2_per_xlm, name FROM projects WHERE id = $1", [projectId]);
-    if (!projectResult.rows[0]) { const e = new Error("Project not found"); e.status = 404; throw e; }
-    const projectCo2PerXlm = projectResult.rows[0].co2_per_xlm;
 
     // Determine numeric amount depending on currency
     const parsedAmount = parseFloat(currency === "XLM" ? amountXLM ?? amount : amount);
@@ -153,8 +153,6 @@ async function recordDonation(req, res, next) {
       e.status = 400;
       throw e;
     }
-
-    client = await pool.connect();
 
     const projectResult = await client.query("SELECT id, co2_per_xlm, name, wallet_address FROM projects WHERE id = $1", [projectId]);
     if (!projectResult.rows[0]) { const e = new Error("Project not found"); e.status = 404; throw e; }
@@ -198,9 +196,9 @@ async function recordDonation(req, res, next) {
 
     const donationResult = await client.query(
       `INSERT INTO donations (
-        id, project_id, donor_address, amount_xlm, amount, currency, message, transaction_hash, donor_country, created_at
+        id, project_id, donor_address, amount_xlm, amount, currency, asset_code, asset_issuer, message, transaction_hash, donor_country, created_at
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
       RETURNING *`,
       [
         uuid(),
@@ -209,6 +207,8 @@ async function recordDonation(req, res, next) {
         currency === "XLM" ? parsedAmount : null,
         parsedAmount,
         currency,
+        currency === "USDC" ? assetCode : null,
+        currency === "USDC" ? assetIssuer : null,
         message?.trim().slice(0, 100) || null,
         transactionHash,
         donorCountry,
