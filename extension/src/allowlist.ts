@@ -1,6 +1,13 @@
+/**
+ * Sites the widget is enabled on out of the box.
+ *
+ * These are the canonical product hosts. Every entry here must also be covered
+ * by an explicit host permission in `manifest.json` and `manifest.firefox.json`,
+ * otherwise the content script can never inject on it — a default the settings
+ * UI would offer but that can never work. `allowlist.test.ts` enforces that
+ * agreement, so add new defaults to both manifests as well.
+ */
 export const DEFAULT_ALLOWLIST: string[] = [
-  'greenpay.io/*',
-  'https://greenpay.io/*',
   'https://greenpay.app/*',
   'https://staging.greenpay.app/*',
 ];
@@ -28,13 +35,71 @@ export function isUrlAllowed(urlStr: string, allowlist: string[]): boolean {
   return allowlist.some((pattern) => matchesPattern(pattern, url));
 }
 
+/** Validate a user-entered host/path allowlist pattern before saving it. */
+export function isValidPattern(pattern: string): boolean {
+  const value = pattern.trim();
+  if (!value || /\s/.test(value)) return false;
+  const match = value.match(/^(\*:\/\/|https?:\/\/)?([^/]+)(\/.*)?$/i);
+  if (!match) return false;
+  const [, scheme, host, path = "/*"] = match;
+  if (scheme && !["*://", "http://", "https://"].includes(scheme.toLowerCase())) return false;
+  if (host === "*" || host.includes("@") || host.includes(":") && !/^\[[0-9a-f:]+\](?::\d+)?$/i.test(host)) return false;
+  const normalizedHost = host.startsWith("*.") ? host.slice(2) : host;
+  if (!/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(normalizedHost)) return false;
+  if (!/^\/[a-z0-9._~!$&'()+,;=:@%/*-]*$/i.test(path)) return false;
+  try {
+    new URL(`${scheme === "*://" ? "https://" : scheme || "https://"}${host.replace(/^\*\./, "wildcard.")}${path.replace(/\*/g, "wildcard")}`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Normalize a user-entered allowlist pattern, or return null when it is invalid.
+ *
+ * Normalization rules (shown as hints in the settings UI):
+ * - surrounding whitespace is removed
+ * - the scheme and host are lower-cased (hosts are case-insensitive), while the
+ *   path keeps its case because URL paths are case-sensitive
+ * - a bare host, or a host followed by only `/`, becomes the site-wide
+ *   `host/*` form so `Example.COM/` and `example.com/*` are the same entry
+ * - a path ending in `/` is treated as a directory prefix and gains `*`
+ *   (`example.com/donate/` → `example.com/donate/*`)
+ */
+export function normalizeAllowlistPattern(pattern: string): string | null {
+  const trimmed = pattern.trim();
+  if (!trimmed || /\s/.test(trimmed)) return null;
+
+  let scheme = '';
+  let rest = trimmed;
+  const schemeMatch = trimmed.match(/^(\*:\/\/|https?:\/\/)/i);
+  if (schemeMatch) {
+    scheme = schemeMatch[1].toLowerCase();
+    rest = trimmed.slice(schemeMatch[1].length);
+  }
+
+  const slashIndex = rest.indexOf('/');
+  const host = (slashIndex === -1 ? rest : rest.slice(0, slashIndex)).toLowerCase();
+  let path = slashIndex === -1 ? '' : rest.slice(slashIndex);
+
+  if (!path || path === '/') {
+    path = '/*';
+  } else if (path.endsWith('/')) {
+    path += '*';
+  }
+
+  const normalized = `${scheme}${host}${path}`;
+  return isValidPattern(normalized) ? normalized : null;
+}
+
 /**
  * Matches a single pattern against a parsed URL.
  *
  * Supported pattern formats:
- * - Scheme + Host + Path: `https://greenpay.io/*`, `http://*.example.com/donate/*`, `*://*.greenpay.app/*`
- * - Host + Path: `greenpay.io/*`, `*.example.com/*`, `example.com/checkout`
- * - Host only: `greenpay.io`, `example.com`, `*.example.com`
+ * - Scheme + Host + Path: `https://greenpay.app/*`, `http://*.example.com/donate/*`, `*://*.greenpay.app/*`
+ * - Host + Path: `greenpay.app/*`, `*.example.com/*`, `example.com/checkout`
+ * - Host only: `greenpay.app`, `example.com`, `*.example.com`
  */
 export function matchesPattern(pattern: string, url: URL): boolean {
   if (!pattern || typeof pattern !== 'string') return false;

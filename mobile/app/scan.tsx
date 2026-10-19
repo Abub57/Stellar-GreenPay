@@ -1,10 +1,21 @@
 /**
  * app/scan.tsx
- * Scan to Donate — reads a project wallet QR code and navigates to the donate
- * screen with the scanned wallet address pre-populated as the destination.
+ * Scan to Donate — reads a project QR code and navigates to the donate screen
+ * with the scanned wallet address and/or project id pre-populated.
  *
- * QR format expected: a Stellar public key (G…) or a deep-link of the form
- *   greenpay://donate?wallet=G...&project=<projectId>
+ * QR formats accepted:
+ *   - a bare Stellar public key (G…)
+ *   - greenpay://donate?wallet=G…&project=<projectId>
+ *   - greenpay://donate/<projectId>
+ *   - any link carrying an explicit `?projectId=` (e.g.
+ *     https://greenpay.app/donate?projectId=proj-42)
+ * The manual-entry field additionally accepts a bare project id.
+ *
+ * Scanning goes through expo-camera's `CameraView` (`onBarcodeScanned` +
+ * `barcodeScannerSettings`) — the deprecated `expo-barcode-scanner` package is
+ * no longer used. Wallet validation is delegated to
+ * `utils/stellarValidation.ts` and repeat frames are suppressed by
+ * `utils/scanThrottle.ts`.
  */
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -18,33 +29,80 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { useTheme } from './theme';
-import { StrKey } from '@stellar/stellar-sdk';
+import type { BarcodeType } from 'expo-camera';
+import { useThemeOrDefault } from './theme';
+import { isValidStellarAddress } from '../utils/stellarValidation';
+import { createScanGate } from '../utils/scanThrottle';
 
 const DEEP_LINK_RE   = /greenpay:\/\/donate\?(.+)/;
+// greenpay://donate/<projectId> — the form printed on project QR codes.
+const DONATE_PATH_RE = /^greenpay:\/\/(?:[^/]+\/)?donate\/([^/?#\s]+)$/i;
+const PROJECT_ID_QUERY_RE = /[?&]projectId=([^&#\s]+)/i;
+// Same grammar the deep-link handler accepts (hooks/useDeepLink.ts).
+const PROJECT_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
-export const INVALID_QR_MESSAGE = 'This QR code is not a valid Stellar address';
+// QR codes only — the expo-camera equivalent of the old
+// `barCodeTypes: [BarCodeScanner.Constants.BarCodeType.qr]`.
+const QR_BARCODE_SETTINGS = { barcodeTypes: ['qr'] as BarcodeType[] };
 
-export function parseScan(data: string): { wallet: string; projectId?: string } | null {
+export const INVALID_QR_MESSAGE = 'This QR code is not a valid GreenPay wallet address. Try again.';
+export const INVALID_MANUAL_MESSAGE =
+  'Enter a GreenPay donation link, project id or Stellar address.';
+
+/** What a scan (or manual entry) resolved to; at least one field is set. */
+export interface ScanPayload {
+  wallet?: string;
+  projectId?: string;
+}
+
+function takeProjectId(raw: string): string | null {
+  const pathMatch = raw.match(DONATE_PATH_RE);
+  const candidate = pathMatch
+    ? pathMatch[1]
+    : raw.match(PROJECT_ID_QUERY_RE)?.[1];
+  if (!candidate) return null;
+
+  let value = candidate;
+  try {
+    value = decodeURIComponent(candidate);
+  } catch {
+    // Keep the raw value when it is not valid percent-encoding.
+  }
+  return PROJECT_ID_RE.test(value) ? value : null;
+}
+
+export function parseScan(data: string): ScanPayload | null {
   const deepMatch = data.match(DEEP_LINK_RE);
   if (deepMatch) {
     const params = new URLSearchParams(deepMatch[1]);
     const wallet = (params.get('wallet') ?? '').trim();
-    if (wallet && StrKey.isValidEd25519PublicKey(wallet)) {
+    if (wallet && isValidStellarAddress(wallet)) {
       return { wallet, projectId: params.get('project') ?? undefined };
     }
     return null;
   }
+
+  const projectId = takeProjectId(data);
+  if (projectId) return { projectId };
+
   const candidate = data.trim();
-  if (candidate && StrKey.isValidEd25519PublicKey(candidate)) {
+  if (candidate && isValidStellarAddress(candidate)) {
     return { wallet: candidate };
   }
   return null;
 }
 
+/** Manual entry accepts everything a scan does, plus a bare project id. */
+export function parseManualEntry(raw: string): ScanPayload | null {
+  const value = raw.trim();
+  if (!value) return null;
+
+  return parseScan(value) ?? (PROJECT_ID_RE.test(value) ? { projectId: value } : null);
+}
+
 export default function ScanScreen() {
   const router = useRouter();
-  const { colors } = useTheme();
+  const { colors } = useThemeOrDefault();
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -84,39 +142,19 @@ export default function ScanScreen() {
 
   const dismissError = () => {
     setError(null);
-    cooldown.current = false;
+    // An explicit dismissal means "scan again now": clear the 500ms interval
+    // as well as the latch so the next frame is accepted immediately.
+    gate.reset();
   };
 
-  const handleBarcode = async ({ data }: { data: string }) => {
-    if (cooldown.current || scanned) return;
-    cooldown.current = true;
-
-    const parsed = parseScan(data);
-    if (!parsed) {
-      setError(INVALID_QR_MESSAGE);
-      return;
-    }
-
-    // Issue #1050: require an explicit identity check before handing the
-    // scanned wallet to the donate screen, and surface the hook's failure
-    // reason instead of navigating silently when the prompt is cancelled.
-    const auth = await bio.authenticate('Confirm your identity to continue to donate');
-    if (!auth.success) {
-      setError(auth.error || 'Authentication failed. Scan again to retry.');
-      setTimeout(() => {
-        setError(null);
-        cooldown.current = false;
-      }, 3000);
-      return;
-    }
-
-    setScanned(true);
-
-    // Build the donate route with the scanned wallet as a query param.
+  const goToDonate = (payload: ScanPayload) => {
+    const walletQuery = payload.wallet
+      ? `?wallet=${encodeURIComponent(payload.wallet)}`
+      : '';
     // The donate/[id] screen reads `wallet` from params to pre-fill the destination.
-    const target = parsed.projectId
-      ? `/donate/${parsed.projectId}?wallet=${encodeURIComponent(parsed.wallet)}`
-      : `/donate/scan?wallet=${encodeURIComponent(parsed.wallet)}`;
+    const target = payload.projectId
+      ? `/donate/${payload.projectId}${walletQuery}`
+      : `/donate/scan?wallet=${encodeURIComponent(payload.wallet ?? '')}`;
     router.push(target as `${string}`);
   };
 
@@ -130,8 +168,7 @@ export default function ScanScreen() {
       // immediately (the 500ms interval still suppresses repeat frames) so a
       // valid code right afterwards is accepted once the window elapses.
       gate.release();
-      setError('QR code is not a valid GreenPay wallet address. Try again.');
-      setTimeout(() => setError(null), 2000);
+      setError(INVALID_QR_MESSAGE);
       return;
     }
 
@@ -141,9 +178,9 @@ export default function ScanScreen() {
   };
 
   const submitManual = () => {
-    const parsed = parseScan(manualValue);
+    const parsed = parseManualEntry(manualValue);
     if (!parsed) {
-      setError('Not a valid GreenPay wallet address. Try again.');
+      setError(INVALID_MANUAL_MESSAGE);
       return;
     }
     processingRef.current = true;
@@ -165,19 +202,39 @@ export default function ScanScreen() {
   if (cameraUnavailable && !manualEntry) {
     return (
       <View style={[styles.centered, { backgroundColor: colors.background }]}>
-        <Text style={[styles.message, { color: colors.text }]}>Camera access is required to scan QR codes.</Text>
-        <TouchableOpacity style={[styles.button, { backgroundColor: colors.buttonBackground }]} onPress={requestPermission}>
-          <Text style={[styles.buttonText, { color: colors.buttonText }]}>Grant Permission</Text>
+        <Text style={[styles.message, { color: colors.text }]}>
+          {permission.granted
+            ? 'Camera could not be started.'
+            : 'Camera access is required to scan QR codes.'}
+        </Text>
+        <TouchableOpacity
+          style={[styles.button, { backgroundColor: colors.buttonBackground }]}
+          onPress={() => setManualEntry(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Type address manually"
+          accessibilityHint="Continue by typing the destination Stellar address yourself"
+          testID="manual-entry-link"
+        >
+          <Text style={[styles.buttonText, { color: colors.buttonText }]}>Type address manually</Text>
         </TouchableOpacity>
         {!permission.granted && (
-          <TouchableOpacity style={styles.button} onPress={requestPermission}>
-            <Text style={styles.buttonText}>Grant Permission</Text>
+          <TouchableOpacity
+            style={[styles.button, { backgroundColor: colors.buttonBackground }]}
+            onPress={requestPermission}
+            accessibilityRole="button"
+            accessibilityLabel="Grant camera permission"
+            accessibilityHint="Lets GreenPay use the camera to scan project QR codes"
+          >
+            <Text style={[styles.buttonText, { color: colors.buttonText }]}>Grant Permission</Text>
           </TouchableOpacity>
         )}
         {Platform.OS !== 'web' && (
           <TouchableOpacity
             style={[styles.button, styles.buttonSecondary, { backgroundColor: colors.secondaryText }]}
             onPress={() => Linking.openSettings()}
+            accessibilityRole="link"
+            accessibilityLabel="Open device settings"
+            accessibilityHint="Opens system settings so you can allow camera access"
           >
             <Text style={[styles.buttonText, { color: colors.buttonText }]}>Open Settings</Text>
           </TouchableOpacity>
@@ -188,13 +245,13 @@ export default function ScanScreen() {
 
   if (manualEntry) {
     return (
-      <View style={styles.centered}>
-        <Text style={styles.message}>Type address manually</Text>
+      <View style={[styles.centered, { backgroundColor: colors.background }]}>
+        <Text style={[styles.message, { color: colors.text }]} accessibilityRole="header">Type address manually</Text>
         <TextInput
-          style={styles.input}
+          style={[styles.input, { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder, color: colors.text }]}
           value={manualValue}
           onChangeText={setManualValue}
-          placeholder="Stellar address (G…)"
+          placeholder="Stellar address, project id or GreenPay link"
           autoCapitalize="none"
           autoCorrect={false}
           accessibilityLabel="Wallet address input"
@@ -202,15 +259,15 @@ export default function ScanScreen() {
         />
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
         <TouchableOpacity
-          style={styles.button}
+          style={[styles.button, { backgroundColor: colors.buttonBackground }]}
           onPress={submitManual}
           accessibilityLabel="Continue with typed address"
           accessibilityRole="button"
         >
-          <Text style={styles.buttonText}>Continue</Text>
+          <Text style={[styles.buttonText, { color: colors.buttonText }]}>Continue</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.button, styles.buttonSecondary]}
+          style={[styles.button, styles.buttonSecondary, { backgroundColor: colors.secondaryText }]}
           onPress={() => {
             setManualEntry(false);
             setError(null);
@@ -218,7 +275,7 @@ export default function ScanScreen() {
           accessibilityLabel="Back to QR scanning"
           accessibilityRole="button"
         >
-          <Text style={styles.buttonText}>Back to QR scanning</Text>
+          <Text style={[styles.buttonText, { color: colors.buttonText }]}>Back to QR scanning</Text>
         </TouchableOpacity>
       </View>
     );
@@ -230,7 +287,7 @@ export default function ScanScreen() {
         style={StyleSheet.absoluteFillObject}
         facing="back"
         onBarcodeScanned={scanned ? undefined : handleBarcode}
-        barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+        barcodeScannerSettings={QR_BARCODE_SETTINGS}
         onMountError={() => setCameraFailed(true)}
       />
 
@@ -250,9 +307,12 @@ export default function ScanScreen() {
         <View style={styles.bottomOverlay}>
           {error ? (
             <TouchableOpacity
-              accessibilityRole="alert"
-              accessibilityLabel="Invalid QR code error. Tap to dismiss and resume scanning."
+              accessibilityRole="button"
+              accessibilityLiveRegion="assertive"
+              accessibilityLabel={`Invalid QR code error: ${error}`}
+              accessibilityHint="Dismisses the error and resumes scanning"
               onPress={dismissError}
+              style={styles.errorTouchable}
             >
               <Text style={styles.errorText}>{error}</Text>
             </TouchableOpacity>
@@ -267,7 +327,9 @@ export default function ScanScreen() {
           {scanned && (
             <TouchableOpacity
               style={[styles.button, { marginTop: 16, backgroundColor: colors.buttonBackground }]}
-              onPress={() => { setScanned(false); cooldown.current = false; }}
+              onPress={() => { setScanned(false); processingRef.current = false; gate.reset(); }}
+              accessibilityRole="button"
+              accessibilityLabel="Scan another QR code"
             >
               <Text style={[styles.buttonText, { color: colors.buttonText }]}>Scan Again</Text>
             </TouchableOpacity>
@@ -299,10 +361,13 @@ const styles = StyleSheet.create({
   button: {
     paddingHorizontal: 24,
     paddingVertical: 12,
+    minHeight: 44,
+    justifyContent: 'center',
     borderRadius: 10,
     marginTop: 8,
   },
   buttonSecondary: {},
+  errorTouchable: { minHeight: 44, justifyContent: 'center' },
   buttonText: {
     fontWeight: '700',
     fontSize: 15,

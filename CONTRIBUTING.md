@@ -2,6 +2,12 @@
 
 Please read our [Code of Conduct](CODE_OF_CONDUCT.md) before contributing.
 
+## 💬 Community & Discussion
+
+We welcome contributors from all backgrounds! Connect with the core maintainers and fellow developers:
+- **Discord**: Join our [#greenpay](https://discord.gg/greenpay) Discord channel for questions, pairing, and real-time project discussions.
+- **Telegram**: Join our [GreenPay Community](https://t.me/greenpay_stellar) on Telegram for community announcements and Q&A.
+
 ## Getting started
 
 1. Fork and clone the repo.
@@ -9,6 +15,19 @@ Please read our [Code of Conduct](CODE_OF_CONDUCT.md) before contributing.
 3. Copy `.env.example` to `.env` and fill in the required values.
 4. Start the backend: `pnpm --filter backend dev`.
 5. Start the mobile app: `pnpm --filter mobile start`.
+
+## Backend coverage
+
+Run the backend suite with coverage from the `backend/` directory:
+
+```bash
+npm test -- --coverage
+```
+
+Jest writes the HTML report to `backend/coverage/lcov-report/index.html` and
+prints the summary in the terminal. The backend Jest configuration enforces a
+global floor of 30% statements and lines, 25% functions, and 20% branches;
+coverage below any floor fails locally and in Backend CI.
 
 ## ✅ Prerequisites
 
@@ -131,6 +150,18 @@ how to record baseline numbers.
 
 Every PR must include an update to [CHANGELOG.md](CHANGELOG.md) under the `[Unreleased]` section describing the change. This keeps the release history accurate and simplifies the release process.
 
+### Translations (i18n)
+
+Every UI string must exist in **all** locale files in `frontend/locales/` (`en.json`, `es.json`, `fr.json`, ...). CI runs `node scripts/check-locale-keys.js` on every PR and fails if any locale has keys missing from, or extra to, `en.json`. The log lists each offending key. If you can't translate a string yet, add the English text as a stub in the other locales. Run the check locally before pushing:
+
+```bash
+node scripts/check-locale-keys.js
+```
+
+### README translations
+
+The README is also available in [Spanish](docs/README.es.md) and [French](docs/README.fr.md). If your PR makes a substantive change to `README.md` (features, project structure, quick start or prerequisites), please mention it in the PR description so the translations can be flagged for update. Perfect sync is not required: the translations carry a "may lag behind the English README" notice, and the English `README.md` is always the source of truth. Translation-only PRs are welcome.
+
 ## Testing
 
 ```bash
@@ -237,4 +268,59 @@ We use Sentry to capture unhandled exceptions and performance traces.
 Quick test (backend): throw an error in any route and confirm it appears in your Sentry project within ~30s.
 
 If you don't have a Sentry project, create one at https://sentry.io and copy the DSN into the env files above.
+
+## 🎃 Hacktoberfest
+
+GreenPay actively participates in [Hacktoberfest](https://hacktoberfest.com)! During September and October, we welcome global open-source contributors to help build, improve, and document the Stellar GreenPay climate donation platform.
+
+### How to Participate
+
+1. **Register**: Sign up at [hacktoberfest.com](https://hacktoberfest.com) between September 26 and October 31.
+2. **Find an Issue**: Browse open issues with the `hacktoberfest` or `good-first-issue` labels. Check the table below for curated beginner and intermediate issues.
+3. **Claim an Issue**: Leave a comment on the issue requesting assignment before starting work to avoid duplicate efforts.
+4. **Follow Project Standards**:
+   - Write clean, minimal code following existing architecture and conventions.
+   - Run unit tests, type checks, and linters before submitting your PR.
+   - If adding UI strings, ensure all locale files (`en.json`, `es.json`, `fr.json`, `ar.json`) remain in parity (`node scripts/check-locale-keys.js`).
+5. **Submit Your Pull Request**:
+   - Target the `main` branch (or specified dev branch).
+   - Reference the issue number (e.g. `Closes #1234`).
+   - Fill out the PR template completely with verification evidence.
+6. **PR Review & `hacktoberfest-accepted` Label**:
+   - Maintainers will review your PR and provide constructive feedback.
+   - Once approved and verified, maintainers will apply the `hacktoberfest-accepted` label to count toward your Hacktoberfest badge.
+
+### Quality Standards & Spam Policy
+
+- **No spam or low-effort PRs**: PRs that merely fix a single typo, add whitespace, or copy-paste AI-generated hallucinated code will be marked `invalid`/`spam` and excluded.
+- **Commit discipline**: Use conventional commits (`feat:`, `fix:`, `test:`, `docs:`, `refactor:`).
+- **Automated CI**: All GitHub Actions checks (lint, build, tests, locale parity) must pass.
+
+### Curated Hacktoberfest Issues (Beginner & Intermediate)
+
+| # | Issue Title | Track | Difficulty | Labels |
+|---|-------------|-------|------------|--------|
+| 1 | Add Hebrew (`he`) locale file and RTL alignment test | Frontend | Beginner | `hacktoberfest`, `good-first-issue`, `i18n` |
+| 2 | Add sound/haptic feedback toggle in donation flow | Frontend | Beginner | `hacktoberfest`, `good-first-issue`, `frontend` |
+| 3 | Add copy-to-clipboard button for transaction hashes on donation success | Frontend | Beginner | `hacktoberfest`, `good-first-issue`, `ux` |
+| 4 | Add dark mode toggle keyboard shortcut (`Cmd/Ctrl + Shift + D`) | Frontend | Beginner | `hacktoberfest`, `good-first-issue`, `accessibility` |
+| 5 | Implement skeleton loaders for project cards while data fetches | Frontend | Beginner | `hacktoberfest`, `good-first-issue`, `frontend` |
+| 6 | Add tooltips explaining Soroban on-chain verification badges | Frontend | Beginner | `hacktoberfest`, `good-first-issue`, `ux` |
+| 7 | Add QR code generator modal for project donation address | Frontend | Intermediate | `hacktoberfest`, `intermediate`, `frontend` |
+| 8 | Filter climate projects by SDG (Sustainable Development Goals) | Frontend | Intermediate | `hacktoberfest`, `intermediate`, `frontend` |
+| 9 | Add pagination or infinite scroll to donor discussion memos | Frontend | Intermediate | `hacktoberfest`, `intermediate`, `frontend` |
+| 10 | Add export certificate as PDF using HTML Canvas/jsPDF | Frontend | Intermediate | `hacktoberfest`, `intermediate`, `frontend` |
+| 11 | Add rate limiting headers (`RateLimit-Limit`, `RateLimit-Remaining`) | Backend | Beginner | `hacktoberfest`, `good-first-issue`, `backend` |
+| 12 | Add health check endpoint (`/api/health/stellar`) checking Horizon status | Backend | Beginner | `hacktoberfest`, `good-first-issue`, `backend` |
+| 13 | Add validation schema for project application webhook notifications | Backend | Beginner | `hacktoberfest`, `good-first-issue`, `backend` |
+| 14 | Add Prometheus metrics exporter for donation transaction counts | Backend | Intermediate | `hacktoberfest`, `intermediate`, `backend` |
+| 15 | Implement caching layer for top donors leaderboard with Redis/TTL | Backend | Intermediate | `hacktoberfest`, `intermediate`, `performance` |
+| 16 | Add automated retry with exponential backoff for Horizon RPC timeouts | Backend | Intermediate | `hacktoberfest`, `intermediate`, `backend` |
+| 17 | Add event emission on project milestone status updates | Contracts | Intermediate | `hacktoberfest`, `intermediate`, `contracts` |
+| 18 | Add unit tests for donation memo length boundary checks | Contracts | Beginner | `hacktoberfest`, `good-first-issue`, `contracts` |
+| 19 | Add interactive API reference using Swagger/OpenAPI spec | Docs | Beginner | `hacktoberfest`, `good-first-issue`, `docs` |
+| 20 | Add local offline development guide using Soroban sandbox network | Docs | Beginner | `hacktoberfest`, `good-first-issue`, `docs` |
+| 21 | Add GitHub Action to auto-label issues based on title prefixes | DevOps | Beginner | `hacktoberfest`, `good-first-issue`, `ci` |
+| 22 | Add Lighthouse accessibility and SEO audit check to frontend PRs | DevOps | Intermediate | `hacktoberfest`, `intermediate`, `ci` |
+
 
