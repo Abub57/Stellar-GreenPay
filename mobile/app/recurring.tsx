@@ -39,10 +39,10 @@ import {
   type RecurringDonation,
   type PaymentRecord,
 } from '../utils/recurringDonations';
+import { isValidStellarAddress } from '../utils/stellarValidation';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
 const MIN_AMOUNT_XLM = 1;
-const DONOR_ADDRESS_RE = /^G[A-Z0-9]{55}$/;
 
 interface ClimateProject {
   id: string;
@@ -121,7 +121,6 @@ function DonationCard({
 
 export default function RecurringScreen() {
   const { colors } = useTheme();
-  const [donations, setDonations] = useState<RecurringDonation[]>([]);
   const [history, setHistory] = useState<PaymentRecord[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'active' | 'history'>('active');
@@ -130,6 +129,7 @@ export default function RecurringScreen() {
   const [projectsLoading, setProjectsLoading] = useState(true);
   const [selectedProjectId, setSelectedProjectId] = useState<string | undefined>();
   const [setupAmount, setSetupAmount] = useState('');
+  const [setupOpen, setSetupOpen] = useState(false);
 
   // Donation status change, announced to screen readers as a live region.
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -152,12 +152,21 @@ export default function RecurringScreen() {
     create,
     cancel,
   } = useRecurringDonations({
-    donorAddress: DONOR_ADDRESS_RE.test(donorAddress) ? donorAddress : undefined,
+    donorAddress: isValidStellarAddress(donorAddress) ? donorAddress : undefined,
   });
   const donations = allDonations.filter((d) => d.status === 'active');
 
+  // Issue #802: the amount is validated as the donor types, so the submit
+  // control can be disabled and an inline error shown instead of letting an
+  // invalid schedule reach the submit handler.
+  const amountIsValid =
+    setupAmount.trim() !== '' &&
+    !Number.isNaN(parseFloat(setupAmount)) &&
+    parseFloat(setupAmount) >= MIN_AMOUNT_XLM;
+  const showAmountError = setupAmount.trim() !== '' && !amountIsValid;
+
   useEffect(() => {
-    if (DONOR_ADDRESS_RE.test(donorAddress)) {
+    if (isValidStellarAddress(donorAddress)) {
       void refresh();
     }
   }, [donorAddress, refresh]);
@@ -189,22 +198,6 @@ export default function RecurringScreen() {
     loadProjects();
   }, [loadProjects]);
 
-
-  useEffect(() => {
-    if (showForm && projects.length === 0) {
-      axios
-        .get(`${API_URL}/api/projects`)
-        .then((res) => {
-          const list: ClimateProject[] = Array.isArray(res.data?.data) ? res.data.data : [];
-          setProjects(list);
-          if (list.length > 0 && !selectedProjectId) {
-            setSelectedProjectId(list[0].id);
-          }
-        })
-        .catch(() => {});
-    }
-  }, [showForm]);
-
   const handleCancel = async (id: string) => {
     setCancellingId(id);
     try {
@@ -221,8 +214,7 @@ export default function RecurringScreen() {
   };
 
   const handleConfirmSetup = async () => {
-    const amountNum = parseFloat(setupAmount);
-    if (!setupAmount || Number.isNaN(amountNum) || amountNum < MIN_AMOUNT_XLM) {
+    if (!amountIsValid) {
       Alert.alert(
         'Invalid Amount',
         `Please enter a valid amount (minimum ${MIN_AMOUNT_XLM} XLM).`
@@ -242,10 +234,11 @@ export default function RecurringScreen() {
       projectName: project.name,
       amountXLM: setupAmount,
       durationMonths: null,
-      donorAddress: DONOR_ADDRESS_RE.test(donorAddress) ? donorAddress : undefined,
+      donorAddress: isValidStellarAddress(donorAddress) ? donorAddress : undefined,
     });
 
     setSetupAmount('');
+    setSetupOpen(false);
     setStatusMessage(
       `Recurring donation of ${created.amountXLM} XLM to ${project.name} set up.`
     );
@@ -253,6 +246,7 @@ export default function RecurringScreen() {
 
   const handleCancelSetup = () => {
     setSetupAmount('');
+    setSetupOpen(false);
     setStatusMessage(null);
   };
 
@@ -267,15 +261,33 @@ export default function RecurringScreen() {
   return (
     <ScrollView style={[styles.container, { backgroundColor: colors.background }]} contentContainerStyle={styles.content}>
       <View style={[styles.header, { backgroundColor: colors.header }]}>
-        <Text style={[styles.headerTitle, { color: colors.headerText }]}>Monthly Giving</Text>
+        <Text style={[styles.headerTitle, { color: colors.headerText }]} accessibilityRole="header">Monthly Giving</Text>
         <Text style={[styles.headerSub, { color: colors.secondaryText }]}>Manage your recurring donations</Text>
       </View>
 
 
       {/* Set up a new recurring donation */}
-      {!projectsLoading && projects.length > 0 && (
-        <View style={[styles.setupCard, { backgroundColor: colors.surface, shadowColor: colors.cardShadow, borderColor: colors.cardBorder }]}>
-          <Text style={[styles.setupTitle, { color: colors.text }]}>Set up a monthly donation</Text>
+      {!projectsLoading && projects.length > 0 && !setupOpen && (
+        <TouchableOpacity
+          testID="create-recurring-button"
+          style={[styles.createBtn, { backgroundColor: colors.primary }]}
+          onPress={() => setSetupOpen(true)}
+          activeOpacity={0.7}
+          accessibilityLabel="Set up a monthly donation"
+          accessibilityRole="button"
+        >
+          <Text style={[styles.createBtnText, { color: colors.buttonText }]}>
+            + Set up a monthly donation
+          </Text>
+        </TouchableOpacity>
+      )}
+
+      {!projectsLoading && projects.length > 0 && setupOpen && (
+        <View
+          testID="recurring-form"
+          style={[styles.setupCard, { backgroundColor: colors.surface, shadowColor: colors.cardShadow, borderColor: colors.cardBorder }]}
+        >
+          <Text style={[styles.setupTitle, { color: colors.text }]} accessibilityRole="header">Set up a monthly donation</Text>
 
           <Text style={[styles.label, { color: colors.text }]}>Project</Text>
           <ScrollView
@@ -315,6 +327,7 @@ export default function RecurringScreen() {
 
           <Text style={[styles.label, { color: colors.text }]}>Amount (XLM)</Text>
           <TextInput
+            testID="recurring-amount-input"
             style={[styles.input, { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder, color: colors.text }]}
             value={setupAmount}
             onChangeText={setSetupAmount}
@@ -324,14 +337,32 @@ export default function RecurringScreen() {
             accessibilityLabel="Recurring donation amount in XLM"
             accessibilityRole="none"
           />
+          {showAmountError && (
+            <Text
+              testID="recurring-amount-error"
+              style={styles.amountError}
+              accessibilityRole="alert"
+              accessibilityLiveRegion="polite"
+            >
+              {`Minimum recurring donation is ${MIN_AMOUNT_XLM} XLM`}
+            </Text>
+          )}
 
           <View style={styles.setupActions}>
             <TouchableOpacity
-              style={[styles.actionBtn, styles.confirmBtn, { backgroundColor: colors.buttonBackground }]}
+              testID="recurring-submit-button"
+              style={[
+                styles.actionBtn,
+                styles.confirmBtn,
+                { backgroundColor: colors.buttonBackground },
+                !amountIsValid && styles.confirmBtnDisabled,
+              ]}
               onPress={handleConfirmSetup}
+              disabled={!amountIsValid}
               activeOpacity={0.7}
               accessibilityLabel="Confirm recurring donation"
               accessibilityRole="button"
+              accessibilityState={{ disabled: !amountIsValid }}
             >
               <Text style={[styles.confirmBtnText, { color: colors.buttonText }]}>Confirm</Text>
             </TouchableOpacity>
@@ -362,11 +393,14 @@ export default function RecurringScreen() {
       ) : null}
 
       {/* Active recurring donations */}
-      <View style={[styles.tabBar, { backgroundColor: colors.surface }]}>
+      <View style={[styles.tabBar, { backgroundColor: colors.surface }]} accessibilityRole="tablist">
         <TouchableOpacity
           style={[styles.tab, activeTab === 'active' && { backgroundColor: colors.primary }]}
           onPress={() => setActiveTab('active')}
           activeOpacity={0.7}
+          accessibilityRole="tab"
+          accessibilityLabel="Active recurring donations"
+          accessibilityState={{ selected: activeTab === 'active' }}
         >
           <Text style={[styles.tabText, { color: activeTab === 'active' ? colors.buttonText : colors.secondaryText }]}>Active</Text>
         </TouchableOpacity>
@@ -374,6 +408,9 @@ export default function RecurringScreen() {
           style={[styles.tab, activeTab === 'history' && { backgroundColor: colors.primary }]}
           onPress={() => setActiveTab('history')}
           activeOpacity={0.7}
+          accessibilityRole="tab"
+          accessibilityLabel="Payment history"
+          accessibilityState={{ selected: activeTab === 'history' }}
         >
           <Text style={[styles.tabText, { color: activeTab === 'history' ? colors.buttonText : colors.secondaryText }]}>History</Text>
         </TouchableOpacity>
@@ -459,6 +496,26 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.08,
     shadowRadius: 3,
   },
+  createBtn: {
+    marginHorizontal: 16,
+    marginTop: 16,
+    borderRadius: 12,
+    padding: 14,
+    minHeight: 48,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  createBtnText: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  amountError: {
+    color: '#b3261e',
+    fontSize: 13,
+    fontWeight: '600',
+    marginTop: -8,
+    marginBottom: 10,
+  },
   setupTitle: {
     fontSize: 17,
     fontWeight: '700',
@@ -476,6 +533,8 @@ const styles = StyleSheet.create({
   },
   projectChip: {
     paddingVertical: 8,
+    minHeight: 44,
+    justifyContent: 'center',
     paddingHorizontal: 14,
     borderRadius: 18,
     borderWidth: 1,
@@ -500,9 +559,14 @@ const styles = StyleSheet.create({
     flex: 1,
     borderRadius: 8,
     paddingVertical: 10,
+    minHeight: 44,
+    justifyContent: 'center',
     alignItems: 'center',
   },
   confirmBtn: {},
+  confirmBtnDisabled: {
+    opacity: 0.5,
+  },
   confirmBtnText: {
     fontSize: 15,
     fontWeight: '700',
@@ -589,6 +653,8 @@ const styles = StyleSheet.create({
     borderColor: '#c62828',
     borderRadius: 8,
     paddingVertical: 8,
+    minHeight: 44,
+    justifyContent: 'center',
     alignItems: 'center',
   },
   cancelBtnText: {
@@ -607,6 +673,8 @@ const styles = StyleSheet.create({
   tab: {
     flex: 1,
     paddingVertical: 10,
+    minHeight: 44,
+    justifyContent: 'center',
     alignItems: 'center',
   },
   tabText: {

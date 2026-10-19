@@ -31,10 +31,18 @@ import {
 import en from "@/locales/en.json";
 import es from "@/locales/es.json";
 import fr from "@/locales/fr.json";
+import ar from "@/locales/ar.json";
 import { setFormattingLocale } from "./formatLocale";
 
-export const SUPPORTED_LOCALES = ["en", "es", "fr"] as const;
+export const SUPPORTED_LOCALES = ["en", "es", "fr", "ar"] as const;
 export type Locale = (typeof SUPPORTED_LOCALES)[number];
+
+export const RTL_LOCALES = ["ar", "he"] as const;
+export type RTLLocale = (typeof RTL_LOCALES)[number];
+
+export function isRTL(locale: string): boolean {
+  return (RTL_LOCALES as readonly string[]).includes(locale);
+}
 
 export const DEFAULT_LOCALE: Locale = "en";
 
@@ -43,18 +51,38 @@ export const LOCALE_STORAGE_KEY = "greenpay:locale";
 /** Key used before the `greenpay:` namespace was introduced (#1073). */
 const LEGACY_LOCALE_STORAGE_KEY = "locale";
 
-const locales: Record<Locale, Record<string, any>> = { en, es, fr };
+type LocaleShape<T> = T extends string
+  ? string
+  : T extends object
+    ? { [Key in keyof T]?: LocaleShape<T[Key]> }
+    : never;
+
+type TranslationPath<T> = T extends object
+  ? {
+      [Key in keyof T & string]: T[Key] extends string
+        ? Key
+        : T[Key] extends object
+          ? `${Key}.${TranslationPath<T[Key]>}`
+          : never;
+    }[keyof T & string]
+  : never;
+
+export type TranslationKey = TranslationPath<typeof en>;
+type StripApplyNamespace<Key> = Key extends `apply.${infer Subkey}` ? Subkey : never;
+export type ApplyTranslationSubkey = StripApplyNamespace<TranslationKey>;
+
+const locales: Record<Locale, LocaleShape<typeof en>> = { en, es, fr, ar };
 
 interface I18nContextValue {
   locale: Locale;
   setLocale: (l: Locale) => void;
-  t: (key: string) => string;
+  t: (key: TranslationKey) => string;
 }
 
 const I18nContext = createContext<I18nContextValue>({
   locale: DEFAULT_LOCALE,
   setLocale: () => {},
-  t: (k) => k,
+  t: (key) => key,
 });
 
 export function isLocale(value: unknown): value is Locale {
@@ -134,13 +162,19 @@ export function resolveInitialLocale(): Locale {
  * Exported so `pages/_document.tsx` can mirror the same intent in its
  * pre-hydration inline script.
  */
-export function applyLocaleToDocument(locale: Locale): void {
+export function applyLocaleToDocument(locale: Locale | string): void {
   if (typeof document === "undefined") return;
   document.documentElement.lang = locale;
+  document.documentElement.dir = isRTL(locale) ? "rtl" : "ltr";
 }
 
-function get(obj: Record<string, any>, path: string): string {
-  return path.split(".").reduce((acc: any, part) => acc?.[part], obj) ?? path;
+function get(obj: unknown, path: TranslationKey): string {
+  let value = obj;
+  for (const part of path.split(".")) {
+    if (typeof value !== "object" || value === null) return path;
+    value = (value as Record<string, unknown>)[part];
+  }
+  return typeof value === "string" ? value : path;
 }
 
 export function I18nProvider({ children }: { children: ReactNode }) {
@@ -174,7 +208,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const t = useCallback((key: string) => get(locales[locale], key), [locale]);
+  const t = useCallback((key: TranslationKey) => get(locales[locale], key), [locale]);
 
   const value = useMemo<I18nContextValue>(
     () => ({ locale, setLocale, t }),

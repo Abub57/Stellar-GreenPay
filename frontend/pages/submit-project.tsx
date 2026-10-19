@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/router";
 import { toast } from "sonner";
 import { notifyAdmin, submitProject } from "@/lib/api";
@@ -54,10 +54,17 @@ function Field({
   error?: string;
   children: React.ReactNode;
 }) {
+  const id =
+    React.isValidElement(children) && (children as any).props?.id
+      ? (children as any).props.id
+      : label.toLowerCase().replace(/[^a-z0-9]/g, "-").replace(/-+/g, "-");
+
   return (
     <div className="flex flex-col gap-1">
-      <label className="label">{label}</label>
-      {children}
+      <label htmlFor={id} className="label">{label}</label>
+      {React.isValidElement(children)
+        ? React.cloneElement(children as React.ReactElement<any>, { id })
+        : children}
       {error && <p className="text-xs text-red-500">{error}</p>}
     </div>
   );
@@ -213,7 +220,7 @@ export default function SubmitProjectPage() {
 
   if (step === "done") {
     return (
-      <div className="max-w-xl mx-auto px-4 py-20 text-center animate-fade-in">
+      <div className="max-w-xl mx-auto px-4 py-20 text-center animate-fade-in motion-reduce:animate-none">
         <div className="text-6xl mb-6">🌿</div>
         <h1 className="font-display text-3xl font-bold text-forest-900 mb-3">
           Project Submitted!
@@ -234,7 +241,7 @@ export default function SubmitProjectPage() {
   }
 
   return (
-    <div className="max-w-2xl mx-auto px-4 py-10 animate-fade-in">
+    <div className="max-w-2xl mx-auto px-4 py-10 animate-fade-in motion-reduce:animate-none">
       <h1 className="font-display text-3xl font-bold text-forest-900 mb-2">
         Submit Your Project
       </h1>
@@ -400,7 +407,14 @@ export default function SubmitProjectPage() {
         </button>
 
         {step === "methodology" ? (
-          <span className="tooltip">
+          <span
+            className="tooltip"
+            onClickCapture={() => {
+              if (publicKey === null) {
+                handleSubmit();
+              }
+            }}
+          >
             <button
               type="button"
               onClick={handleSubmit}

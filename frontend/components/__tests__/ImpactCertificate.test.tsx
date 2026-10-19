@@ -1,6 +1,7 @@
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { render, screen } from "@testing-library/react";
 import ImpactCertificate from "../ImpactCertificate";
-import { badgeLabel } from "@/utils/format";
 
 const baseProps = {
   donorAddress: "GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRST",
@@ -37,18 +38,24 @@ describe("ImpactCertificate", () => {
     expect(screen.getByText("Amazon Reforestation")).toBeInTheDocument();
   });
 
+  it("keeps branch-name merge residue out of component tests", () => {
+    const sourceFiles = (directory: string): string[] =>
+      readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+        const path = join(directory, entry.name);
+        if (entry.isDirectory()) return sourceFiles(path);
+        return /\.(?:[cm]?[jt]sx?)$/.test(entry.name) ? [path] : [];
+      });
+    const residue = /^\s*(?:main|fix\/[\w./-]+|feature\/[\w./-]+)\s*$/m;
+    for (const path of sourceFiles(__dirname)) {
+      expect(readFileSync(path, "utf8")).not.toMatch(residue);
+    }
+  });
+
   it("matches snapshot", () => {
     const { container } = render(<ImpactCertificate {...baseProps} />);
     expect(container).toMatchSnapshot();
   });
- feat/project-share-buttons
-  it.each(["seedling", "tree", "forest", "earth"] as const)(
-    "renders the %s badge tier",
-    (badgeTier) => {
-      render(<ImpactCertificate {...baseProps} badgeTier={badgeTier} />);
-      expect(screen.getByText(badgeLabel(badgeTier))).toBeInTheDocument();
-    }
-  );
+
   it.each([
     ["seedling", "Seedling"],
     ["tree", "Tree"],
@@ -58,5 +65,4 @@ describe("ImpactCertificate", () => {
     render(<ImpactCertificate {...baseProps} badgeTier={badgeTier} />);
     expect(screen.getByText(label)).toBeInTheDocument();
   });
- main
 });
