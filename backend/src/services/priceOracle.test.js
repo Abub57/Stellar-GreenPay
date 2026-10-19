@@ -23,14 +23,18 @@ function orderbook(askNumerator, askDenominator, bidNumerator, bidDenominator) {
   };
 }
 
+const FIAT_CACHE_KEY = "xlm_fiat_rates";
+
 beforeEach(() => {
   cache.del(CACHE_KEY);
+  cache.del(FIAT_CACHE_KEY);
   horizonServer.orderbook.mockReset();
   jest.useRealTimers();
 });
 
 afterEach(() => {
   cache.del(CACHE_KEY);
+  cache.del(FIAT_CACHE_KEY);
   jest.useRealTimers();
 });
 
@@ -93,5 +97,54 @@ describe("services/priceOracle", () => {
     await expect(getUsdcToXlmRate()).resolves.toBe(FALLBACK_XLM_PER_USDC);
     await expect(getUsdcToXlmRate()).resolves.toBe(FALLBACK_XLM_PER_USDC);
     expect(call).toHaveBeenCalledTimes(1);
+  });
+
+  test("getFiatRates returns exchange rates for USD, EUR, and BRL", async () => {
+    const { getFiatRates } = require("./priceOracle");
+    const call = jest.fn().mockResolvedValue(orderbook(8, 1, 8, 1));
+    mockOrderbookCall(call);
+
+    const originalFetch = global.fetch;
+    global.fetch = jest.fn().mockRejectedValue(new Error("Network offline"));
+
+    try {
+      const fiat = await getFiatRates();
+      expect(fiat).toHaveProperty("rates");
+      expect(fiat.rates).toHaveProperty("USD");
+      expect(fiat.rates).toHaveProperty("EUR");
+      expect(fiat.rates).toHaveProperty("BRL");
+      expect(fiat.rates.USD).toBeCloseTo(0.125, 4);
+      expect(fiat.rates.EUR).toBeCloseTo(0.125 * 0.92, 4);
+      expect(fiat.rates.BRL).toBeCloseTo(0.125 * 5.5, 4);
+      expect(fiat.cached).toBe(false);
+
+      // Subsequent call should be cached
+      const cachedFiat = await getFiatRates();
+      expect(cachedFiat.cached).toBe(true);
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  test("getFiatRates uses external CoinGecko rates when available", async () => {
+    cache.del(FIAT_CACHE_KEY);
+    const { getFiatRates } = require("./priceOracle");
+    const originalFetch = global.fetch;
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        stellar: { usd: 0.15, eur: 0.138, brl: 0.825 },
+      }),
+    });
+
+    try {
+      const fiat = await getFiatRates();
+      expect(fiat.rates.USD).toBe(0.15);
+      expect(fiat.rates.EUR).toBe(0.138);
+      expect(fiat.rates.BRL).toBe(0.825);
+      expect(fiat.fallback).toBe(false);
+    } finally {
+      global.fetch = originalFetch;
+    }
   });
 });

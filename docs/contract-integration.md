@@ -8,10 +8,10 @@ This guide enables third-party developers to integrate with the **GreenPay Donat
 - [Core Concepts](#core-concepts)
 - [Recording Donations (Cross-Contract Calls)](#recording-donations-cross-contract-calls)
 - [Querying Donor Statistics](#querying-donor-statistics)
-- [Badge Tiers & Thresholds](#badge-tiers--thresholds)
+- [Badge Tiers & Thresholds](#badge-tiers-thresholds)
 - [TypeScript Client Examples](#typescript-client-examples)
 - [Complete Soroban Contract Example](#complete-soroban-contract-example)
-- [Error Handling & Best Practices](#error-handling--best-practices)
+- [Error Handling & Best Practices](#error-handling-best-practices)
 - [Testing](#testing)
 
 ---
@@ -752,11 +752,11 @@ impl PartnerContract {
 ```bash
 # Build the contract
 cd contracts/example-partner-contract
-cargo build --target wasm32-unknown-unknown --release
+cargo build --target wasm32v1-none --release
 
 # Deploy to testnet
 stellar contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/example_partner_contract.wasm \
+  --wasm target/wasm32v1-none/release/example_partner_contract.wasm \
   --source <your-key> \
   --network testnet
 
