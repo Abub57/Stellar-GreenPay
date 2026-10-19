@@ -16,8 +16,9 @@
  * with ssr:false.
  */
 import Link from "next/link";
+import { useEffect, useRef } from "react";
 import { Marker, Popup } from "react-leaflet";
-import type { LatLngExpression } from "leaflet";
+import type { LatLngExpression, Marker as LeafletMarker } from "leaflet";
 import type { ClimateProject } from "@/utils/types";
 import { formatXLM, progressPercent, CATEGORY_ICONS } from "@/utils/format";
 import ProjectImage from "./ProjectImage";
@@ -28,11 +29,36 @@ interface ProjectMapMarkerProps {
 }
 
 export default function ProjectMapMarker({ project, position }: ProjectMapMarkerProps) {
+  const markerRef = useRef<LeafletMarker | null>(null);
   const pct = Math.min(progressPercent(project.raisedXLM, project.goalXLM), 100);
   const icon = CATEGORY_ICONS[project.category] ?? "🌿";
 
+  useEffect(() => {
+    const markerElement = markerRef.current?.getElement();
+    if (!markerElement) return;
+
+    markerElement.tabIndex = 0;
+    markerElement.setAttribute("role", "button");
+    markerElement.setAttribute(
+      "aria-label",
+      `${project.name}, ${formatXLM(project.raisedXLM, 0)} XLM raised. Press Enter or Space to view project details.`,
+    );
+    const openPopup = (event: KeyboardEvent) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      markerRef.current?.openPopup();
+    };
+    markerElement.addEventListener("keydown", openPopup);
+    return () => markerElement.removeEventListener("keydown", openPopup);
+  }, [project.name, project.raisedXLM]);
+
   return (
-    <Marker position={position}>
+    <Marker
+      ref={markerRef}
+      position={position}
+      keyboard
+      title={`${project.name} — ${formatXLM(project.raisedXLM, 0)} XLM raised`}
+    >
       <Popup
         // Keep popup open on hover, close on click-outside
         closeButton={true}
@@ -48,6 +74,7 @@ export default function ProjectMapMarker({ project, position }: ProjectMapMarker
           {project.imageUrl ? (
             <ProjectImage
               src={project.imageUrl}
+              name={project.name}
               alt={project.name}
               className="w-full h-24 object-cover rounded-lg border border-forest-100"
             />
@@ -79,7 +106,7 @@ export default function ProjectMapMarker({ project, position }: ProjectMapMarker
               aria-label={`${pct.toFixed(0)}% funded`}
             >
               <div
-                className="h-full rounded-full bg-forest-500 transition-all duration-500"
+                className="h-full rounded-full bg-forest-500 transition-all motion-reduce:transition-none duration-500"
                 style={{ width: `${pct}%` }}
               />
             </div>

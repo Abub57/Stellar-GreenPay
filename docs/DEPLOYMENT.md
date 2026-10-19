@@ -2,6 +2,14 @@
 
 This document covers the full production deployment process for Stellar-GreenPay using Kubernetes and Helm.
 
+## Mobile app releases
+
+For the Expo/EAS mobile build, tester distribution, app versioning, environment
+configuration, and store-submission process, see the
+[Mobile Build and Release guide](../mobile/README.md#mobile-build-and-release).
+The current GitHub workflow builds preview artifacts only; it does not submit
+mobile apps to a store.
+
 ## Prerequisites
 
 Before deploying to production, ensure you have the following installed and configured:
@@ -212,7 +220,7 @@ After deploying the infrastructure, you must deploy and register the Soroban sma
 
 ```bash
 stellar contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/greenpay_contract.wasm \
+  --wasm target/wasm32v1-none/release/greenpay_contract.wasm \
   --source admin \
   --network mainnet
 ```

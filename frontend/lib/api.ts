@@ -17,6 +17,7 @@ import type {
   ProjectCampaign,
   VerificationRequest,
   ProjectReview,
+  ProjectComment,
   Team,
   TeamLeaderboardEntry,
 } from "@/utils/types";
@@ -116,7 +117,7 @@ export async function csrfFetch(input: RequestInfo, init: RequestInit = {}) {
  *
  * @example
  * const projects = await fetchProjects({ verified: true, limit: 12 });
- * console.log("projects:", projects.length);
+ * // Render the projects in the page.
  */
 export async function fetchProjects(params?: {
   category?: string;
@@ -288,8 +289,15 @@ export async function recordDonation(payload: {
   amountXLM?: string;
   amount?: string;
   currency?: "XLM" | "USDC";
+  assetCode?: string;
+  assetIssuer?: string;
   message?: string;
   transactionHash: string;
+  /**
+   * DEX path payment (#1660). The backend then ignores amount/currency and
+   * records what Horizon says the project wallet actually received.
+   */
+  pathPayment?: boolean;
 }) {
   const { data } = await api.post<{ success: boolean; data: Donation }>(
     "/api/donations",
@@ -462,6 +470,57 @@ export async function fetchProjectReviews(
     pagination: { total: number; limit: number; offset: number; has_more: boolean };
   }>(`/api/ratings/project/${projectId}`, { params: { limit, offset } });
   return data;
+}
+
+// ── Comments ─────────────────────────────────────────────────────────────────
+/**
+ * Fetch one page of the public comment thread for a project (newest first).
+ *
+ * @param projectId - Project id.
+ * @param options - Page size (default 10) and the cursor from the previous page.
+ */
+export async function fetchProjectComments(
+  projectId: string,
+  { limit = 10, cursor }: { limit?: number; cursor?: string | null } = {},
+) {
+  const { data } = await api.get<{
+    success: boolean;
+    data: ProjectComment[];
+    next_cursor: string | null;
+    has_more: boolean;
+  }>(`/api/comments/project/${projectId}`, {
+    params: cursor ? { limit, cursor } : { limit },
+  });
+  return data;
+}
+
+/**
+ * Post a comment as the authenticated donor. The backend derives the author
+ * from the wallet-auth token, requires a recorded donation to the project,
+ * moderates the text, and rate limits per wallet.
+ *
+ * @returns The stored comment. `moderationStatus` is "pending_review" when it
+ *   is held for a moderator and not yet public.
+ * @throws 401 unauthenticated, 403 not a donor, 422 rejected by moderation,
+ *   429 rate limited.
+ */
+export async function postProjectComment(projectId: string, body: string): Promise<ProjectComment> {
+  const token = await getWalletAuthToken();
+  const { data } = await api.post<{ success: boolean; data: ProjectComment }>(
+    "/api/comments",
+    { projectId, body },
+    token ? { headers: { Authorization: `Bearer ${token}` } } : undefined,
+  );
+  return data.data;
+}
+
+/** Soft-delete the authenticated donor's own comment. */
+export async function deleteProjectComment(commentId: string): Promise<void> {
+  const token = await getWalletAuthToken();
+  await api.delete(
+    `/api/comments/${commentId}`,
+    token ? { headers: { Authorization: `Bearer ${token}` } } : undefined,
+  );
 }
 
 // ── Profiles ──────────────────────────────────────────────────────────────────
@@ -728,6 +787,42 @@ export async function fetchSubscriberCount(projectId: string) {
   return data.count;
 }
 
+export interface RecurringDonation {
+  id: string;
+  donorAddress: string;
+  projectId: string;
+  projectName?: string;
+  amountXlm: number;
+  currency: string;
+  nextDueDate: string;
+  durationMonths: number;
+  remainingMonths: number;
+  status: "active" | "paused" | "completed" | "cancelled";
+  createdAt: string;
+}
+
+/**
+ * Create a recurring monthly donation pledge.
+ *
+ * @param payload - Pledge details. The backend enforces a 1 XLM minimum and a
+ *   1–120 month duration.
+ * @returns The created pledge.
+ * @throws If the request fails or validation is rejected by the backend.
+ */
+export async function createRecurringDonation(payload: {
+  donorAddress: string;
+  projectId: string;
+  amountXlm: number;
+  durationMonths: number;
+  startDate?: string;
+}) {
+  const { data } = await api.post<{ success: boolean; data: RecurringDonation }>(
+    "/api/recurring-donations",
+    payload,
+  );
+  return data.data;
+}
+
 export interface ProjectNotificationSubscription {
   id: string;
   projectId: string;
@@ -889,6 +984,35 @@ export async function fetchUnreadNotificationCount({
     { params },
   );
   return data.unreadCount;
+}
+
+export interface NotificationPreferences {
+  projectUpdates: boolean;
+  donations: boolean;
+  milestones: boolean;
+}
+
+const NOTIFICATION_PREFS_KEY = "greenpay:notification:preferences";
+
+const defaultPreferences: NotificationPreferences = {
+  projectUpdates: true,
+  donations: true,
+  milestones: true,
+};
+
+export function loadNotificationPreferences(): NotificationPreferences {
+  if (typeof window === "undefined") return { ...defaultPreferences };
+  try {
+    const stored = localStorage.getItem(NOTIFICATION_PREFS_KEY);
+    if (!stored) return { ...defaultPreferences };
+    return { ...defaultPreferences, ...JSON.parse(stored) };
+  } catch {
+    return { ...defaultPreferences };
+  }
+}
+
+export function saveNotificationPreferences(prefs: NotificationPreferences): void {
+  localStorage.setItem(NOTIFICATION_PREFS_KEY, JSON.stringify(prefs));
 }
 
 // ── Update Likes ─────────────────────────────────────────────────
